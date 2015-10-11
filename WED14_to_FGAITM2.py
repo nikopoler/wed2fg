@@ -34,20 +34,20 @@ from xml.dom.minidom import parseString
 
 def latNS (coord):
     deg = int (coord)
-    if coord < 0 : line = "S" + str (deg)
-    else: line = "N" + str (deg)
+    if coord < 0 :
+        line = "S" + str (-deg) + " " + str ("%.3f" % (-60 * (coord - deg)))
+    else:
+        line = "N" + str (deg) + " " + str ("%.3f" % (60 * (coord - deg)))
 
-    min = coord - deg
-    line = line + " " + str ("%.3f" % (60 * min))
     return line
 
 def lonEW (coord):
     deg = int (coord)
-    if coord < 0 : line = "W" + str (deg)
-    else: line = "E" + str (deg)
+    if coord < 0 :
+        line = "W" + str (-deg) + " " + str ("%.3f" % (-60 * (coord - deg)))
+    else:
+        line = "E" + str (deg) + " " + str ("%.3f" % (60 * (coord - deg)))
 
-    min = coord - deg
-    line = line + " " + str ("%.3f" % (60 * min))
     return line
 
 def main():
