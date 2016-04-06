@@ -21,6 +21,7 @@
 #  MA 02110-1301, USA.
 #  
 #  
+import argparse
 
 '''
 Convert WED-1.4 Ramps and AI TaxiRoute to FG AI TrafficManagerII groundnet
@@ -52,8 +53,19 @@ def lonEW (coord):
     return line
 
 def main():
+    
+    parser = argparse.ArgumentParser(description="wed2fg reads a Worldeditor (WED) file and generates flightgear groundnets ")
+    parser.add_argument("-f", "--file", dest="filename",
+                        help="read filename", default="earth.wed.xml", required=False)
+    parser.add_argument("-o", "--output_dir", dest="output_dir",
+                        help="use output directory", default=".", required=False)
+    parser.add_argument("-s", "--subdirs", dest="subdirs", action="store_true",
+                        help="generate subdirectories", required=False)
+    
+    args = parser.parse_args()
+
     #Open
-    filexml = ET.parse  ("earth.wed.xml")
+    filexml = ET.parse  (args.filename)
     objects = filexml.getroot().find("objects")
     logging.basicConfig()
     logging.getLogger().setLevel(logging.INFO)
@@ -142,9 +154,15 @@ def main():
                 arc.set ("isPushBackRoute", "0")
                 arc.set ("name", route['name'])
         
+            
         #Save
-        basedir = os.getcwd()
-        file_groundnet = open (os.path.join (basedir,  airport_icao + ".groundnet.xml"), "w")
+        basedir = os.path.abspath(args.output_dir)
+        if args.subdirs:
+            if not os.path.exists(os.path.join (basedir, airport_icao[0], airport_icao[1], airport_icao[2])):
+                os.makedirs(os.path.join (basedir, airport_icao[0], airport_icao[1], airport_icao[2]))
+            file_groundnet = open (os.path.join (basedir, airport_icao[0], airport_icao[1], airport_icao[2],  airport_icao + ".groundnet.xml"), "w")
+        else:
+            file_groundnet = open (os.path.join (basedir,  airport_icao + ".groundnet.xml"), "w")
         ps = parseString (ET.tostring (groundnet))
         file_groundnet.writelines (ps.toprettyxml(indent="  "))
         file_groundnet.flush()
