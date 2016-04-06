@@ -31,6 +31,7 @@ Groundnet will be written to files ICAO.groundnet.xml
 import xml.etree.ElementTree as ET
 import os
 from xml.dom.minidom import parseString
+import logging
 
 def latNS (coord):
     deg = int (coord)
@@ -54,12 +55,15 @@ def main():
     #Open
     filexml = ET.parse  ("earth.wed.xml")
     objects = filexml.getroot().find("objects")
+    logging.basicConfig()
+    logging.getLogger().setLevel(logging.INFO)
     
     #Iterate over airports
     for airport in objects.findall("*[@class='WED_Airport']"):
         airport_id = airport.get("id")
         airport_name = airport.find("hierarchy").get("name")
         airport_icao = airport.find("airport").get("icao")
+        logging.info("Processing %s (%s)" %( airport_name, airport_icao))
         
         #Collect
         TaxiRouteNode = []
