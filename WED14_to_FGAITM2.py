@@ -86,17 +86,39 @@ def main():
             TaxiRouteNode.append ({'id': obj.get ("id"), \
                                   'lat': latNS (eval(point.get("latitude"))), \
                                   'lon': lonEW (eval(point.get("longitude")))})
+        #Count runways
+        num_runways = 0
+        for obj in objects.findall("*[@class='WED_Runway']"):
+            if obj.get("parent_id") != airport_id:
+                continue
+            num_runways += 1
+            
         
         TaxiRoute = []
+        RunWays = []
+        RunWayEnds = {}
         for obj in objects.findall("*[@class='WED_TaxiRoute']"):
             if obj.get("parent_id") != airport_id:
                 continue
             beg, en = obj.find ("sources").findall ("source")
-            TaxiRoute.append ({'begin':beg.attrib["id"], \
-                                 'end':en.attrib["id"], \
-                                'name':obj.find("hierarchy").attrib["name"], \
-                              'oneway':obj.find("taxi_route").attrib["oneway"] \
-                              })
+            runway_name = obj.find("taxi_route").attrib["runway"]
+            if runway_name and not runway_name == "None":
+        #Find the runways (could be nicer if Python would support more XPath)
+        #We want to ignore them since flightgear doesn't want them
+                RunWays.append({'name':runway_name,\
+                                'begin':beg.attrib["id"], \
+                                'end':en.attrib["id"], \
+                                })
+                #TODO Check for doubles (Warning since we want single element runways)
+                RunWayEnds[beg.attrib["id"]] = runway_name 
+                RunWayEnds[en.attrib["id"]] = runway_name                 
+            else:
+                TaxiRoute.append ({'begin':beg.attrib["id"], \
+                                   'end':en.attrib["id"], \
+                                   'name':obj.find("hierarchy").attrib["name"], \
+                                   'oneway':obj.find("taxi_route").attrib["oneway"] \
+                                  })
+            
             
         RampPosition = []
         for obj in objects.findall("*[@class='WED_RampPosition']"):
@@ -110,6 +132,8 @@ def main():
                 'heading': obj.find("point").get("heading"), \
                    'type': obj.find("ramp_start").get("type") 
                                 })
+        
+        
         
         #Make XML
         groundnet = ET.Element("groundnet")
@@ -128,6 +152,16 @@ def main():
             Parking.set ("number", "")
             Parking.set ("radius", "40")
             Parking.set ("airlineCodes", "")
+
+        num_runway_routes = len(RunWays)
+        num_runway_route_ends = len(RunWayEnds)
+        
+        if num_runways > num_runway_routes :
+            logging.warn("Too few runway routes. There should only be one segment tagged as the actual runway")
+        if num_runways < num_runway_routes :
+            logging.warn("Too many runway routes. There should only be one segment tagged as the actual runway")
+        if num_runway_routes > 0 and round(num_runway_route_ends/num_runway_routes, 3) <> round(num_runway_route_ends/num_runway_routes, 0) :
+            logging.warn("Possible mismatch between runways and runway ends")
         
         TaxiNodes = ET.SubElement (groundnet, "TaxiNodes")
         for point in TaxiRouteNode:
@@ -135,9 +169,13 @@ def main():
             node.set ("index", point['id'])
             node.set ("lat", point['lat'])
             node.set ("lon", point['lon'])
-            node.set ("isOnRunway", "0")
+            if point['id'] in RunWayEnds:                
+                node.set ("isOnRunway", "1")
+            else:
+                node.set ("isOnRunway", "0")
             node.set ("holdPointType", "none")
         
+        #Start building the flightgear groundnet
         TaxiWaySegments = ET.SubElement (groundnet, "TaxiWaySegments")
         for route in TaxiRoute:
             arc = ET.SubElement (TaxiWaySegments, "arc")
