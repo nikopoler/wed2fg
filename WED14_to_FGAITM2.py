@@ -22,6 +22,10 @@
 #  
 #  
 import argparse
+# -- build KDtree for static models
+from scipy.spatial import KDTree
+import numpy
+import math
 
 '''
 Convert WED-1.4 Ramps and AI TaxiRoute to FG AI TrafficManagerII groundnet
@@ -33,6 +37,21 @@ import xml.etree.ElementTree as ET
 import os
 from xml.dom.minidom import parseString
 import logging
+
+def calc_distance(node1, node2):
+    """
+    Calculate the great circle distance between two points
+    on the earth (specified in decimal degrees)
+    """    
+    dlon = math.radians(node2[1]) - math.radians(node1[1])
+    dlat = math.radians(node2[0]) - math.radians(node1[0])
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(node1[0])) * math.cos(math.radians(node2[0])) * math.sin(dlon / 2) ** 2
+    c = 2 * math.asin(math.sqrt(a))
+
+    # 6367 km is the radius of the Earth
+    km = 6367 * c
+#     print km
+    return km
 
 def latNS (coord):
     deg = int (coord)
@@ -61,6 +80,8 @@ def main():
                         help="use output directory", default=".", required=False)
     parser.add_argument("-s", "--subdirs", dest="subdirs", action="store_true",
                         help="generate subdirectories", required=False)
+    parser.add_argument("-c", "--connect-parking", dest="connect_parking", action="store_true",
+                        help="connect parking positions (WED)", required=False)
     
     args = parser.parse_args()
 
@@ -69,6 +90,8 @@ def main():
     objects = filexml.getroot().find("objects")
     logging.basicConfig()
     logging.getLogger().setLevel(logging.INFO)
+    if args.connect_parking:
+        logging.info("Unconnected parkings will be connected to nearest node")
     
     #Iterate over airports
     for airport in objects.findall("*[@class='WED_Airport']"):
@@ -84,6 +107,8 @@ def main():
                 continue
             point = obj.find ("point")
             TaxiRouteNode.append ({'id': obj.get ("id"), \
+                                  'lat_deg': eval(point.get("latitude")), \
+                                  'lon_deg': eval(point.get("longitude")), \
                                   'lat': latNS (eval(point.get("latitude"))), \
                                   'lon': lonEW (eval(point.get("longitude")))})
         #Count runways
@@ -116,7 +141,8 @@ def main():
                 TaxiRoute.append ({'begin':beg.attrib["id"], \
                                    'end':en.attrib["id"], \
                                    'name':obj.find("hierarchy").attrib["name"], \
-                                   'oneway':obj.find("taxi_route").attrib["oneway"] \
+                                   'oneway':obj.find("taxi_route").attrib["oneway"], \
+                                   'isPushBackRoute':'0' \
                                   })
             
             
@@ -127,6 +153,8 @@ def main():
             RampPosition.append({ \
                      'id': obj.attrib['id'], \
                    'name': obj.find("hierarchy").get("name"), \
+                'lat_deg': eval(obj.find("point").get("latitude")), \
+                'lon_deg': eval(obj.find("point").get("longitude")), \
                     'lat': latNS (eval(obj.find("point").get("latitude"))), \
                     'lon': lonEW (eval(obj.find("point").get("longitude"))), \
                 'heading': obj.find("point").get("heading"), \
@@ -138,6 +166,14 @@ def main():
         #Make XML
         groundnet = ET.Element("groundnet")
         groundnet.append(ET.Comment("Groundnet for %s (%s)" % (airport_name,airport_icao)))
+
+#         transformed_list = [ [x['id'], x['lat_deg'], x['lon_deg']] for x in TaxiRouteNode]
+        transformed_list = [[x['lat_deg'], x['lon_deg']] for x in TaxiRouteNode]
+        if len(transformed_list) == 0:
+            logging.info('No routepoints for nearest search')
+            tree = None
+        else:
+            tree = KDTree(transformed_list, leafsize=3)        
         
         parkingList = ET.SubElement (groundnet, "parkingList")
         for ramp in RampPosition:
@@ -150,20 +186,27 @@ def main():
             #dummy below
             Parking.set ("type", "gate")
             Parking.set ("number", "")
+            #TODO calc by type
             Parking.set ("radius", "40")
-            Parking.set ("airlineCodes", "")
-
-        num_runway_routes = len(RunWays)
-        num_runway_route_ends = len(RunWayEnds)
-        
-        if num_runways > num_runway_routes :
-            logging.warn("Too few runway routes. There should only be one segment tagged as the actual runway")
-        if num_runways < num_runway_routes :
-            logging.warn("Too many runway routes. There should only be one segment tagged as the actual runway")
-        if num_runway_routes > 0 and round(num_runway_route_ends/num_runway_routes, 3) <> round(num_runway_route_ends/num_runway_routes, 0) :
-            logging.warn("Possible mismatch between runways and runway ends")
+            Parking.set ("airlineCodes", "")     
+            
+            if not tree is None:
+#                 print [ramp['lat_deg'], ramp['lon_deg']]
+                nearest = tree.query_ball_point( [ramp['lat_deg'], ramp['lon_deg']], 0.01)
+                dist = [(calc_distance( [ramp['lat_deg'], ramp['lon_deg']], tree.data[x]), tree.data[x], TaxiRouteNode[x]) for x in nearest]
+#                 print tree.data[dist[0]]
+                dist = sorted(dist, key=lambda point: point[0])
+                if dist[0][0]>0.5:
+                    logging.warn("Long distance route for %s (%d3)", ramp['name'], dist[0][0] )
+                nearest_node = dist[0][2]
+                route = {'begin': nearest_node['id'], 'end': ramp['id'], 'name': ramp['name'], 'oneway': '0', 'isPushBackRoute':'1'}
+                TaxiRoute.append(route)
+                logging.debug("Added route for ramp %s", ramp['name'])
+#                 print dist[0][2]
+            #TODO        
         
         TaxiNodes = ET.SubElement (groundnet, "TaxiNodes")
+
         for point in TaxiRouteNode:
             node = ET.SubElement(TaxiNodes, "node")
             node.set ("index", point['id'])
@@ -174,6 +217,7 @@ def main():
             else:
                 node.set ("isOnRunway", "0")
             node.set ("holdPointType", "none")
+            
         
         #Start building the flightgear groundnet
         TaxiWaySegments = ET.SubElement (groundnet, "TaxiWaySegments")
@@ -189,7 +233,7 @@ def main():
                 arc = ET.SubElement (TaxiWaySegments, "arc")
                 arc.set ("begin", route['end'])
                 arc.set ("end", route['begin'])
-                arc.set ("isPushBackRoute", "0")
+                arc.set ("isPushBackRoute", route['isPushBackRoute'])
                 arc.set ("name", route['name'])
         
             
