@@ -72,7 +72,7 @@ def lonEW (coord):
     return line
 
 def main():
-    
+   
     parser = argparse.ArgumentParser(description="wed2fg reads a Worldeditor (WED) file and generates flightgear groundnets ")
     parser.add_argument("-f", "--file", dest="filename",
                         help="read filename", default="earth.wed.xml", required=False)
@@ -82,6 +82,8 @@ def main():
                         help="generate subdirectories", required=False)
     parser.add_argument("-c", "--connect-parking", dest="connect_parking", action="store_true",
                         help="connect parking positions (WED)", required=False)
+    parser.add_argument("-n", "--nesting", dest="nesting", action="store_true",
+                        help="enable deep nesting support (WED)", default=False, required=False)
     
     args = parser.parse_args()
 
@@ -99,11 +101,16 @@ def main():
         airport_name = airport.find("hierarchy").get("name")
         airport_icao = airport.find("airport").get("icao")
         logging.info("Processing %s (%s)" %( airport_name, airport_icao))
+        groups = []
+        for grp in objects.findall("*[@class='WED_Group']"):
+            if grp.get("parent_id") != airport_id:
+                 continue
+            groups.append( grp.get("id"))
         
         #Collect
         TaxiRouteNode = []
         for obj in objects.findall("*[@class='WED_TaxiRouteNode']"):
-            if obj.get("parent_id") != airport_id:
+            if obj.get("parent_id") != airport_id and not obj.get("parent_id") in groups:
                 continue
             point = obj.find ("point")
             TaxiRouteNode.append ({'id': obj.get ("id"), \
@@ -114,7 +121,7 @@ def main():
         #Count runways
         num_runways = 0
         for obj in objects.findall("*[@class='WED_Runway']"):
-            if obj.get("parent_id") != airport_id:
+            if obj.get("parent_id") != airport_id and not obj.get("parent_id") in groups:
                 continue
             num_runways += 1
             
@@ -123,7 +130,7 @@ def main():
         RunWays = []
         RunWayEnds = {}
         for obj in objects.findall("*[@class='WED_TaxiRoute']"):
-            if obj.get("parent_id") != airport_id:
+            if obj.get("parent_id") != airport_id and not obj.get("parent_id") in groups:
                 continue
             beg, en = obj.find ("sources").findall ("source")
             runway_name = obj.find("taxi_route").attrib["runway"]
@@ -148,7 +155,7 @@ def main():
             
         RampPosition = []
         for obj in objects.findall("*[@class='WED_RampPosition']"):
-            if obj.get("parent_id") != airport_id:
+            if obj.get("parent_id") != airport_id and not obj.get("parent_id") in groups:
                 continue
             RampPosition.append({ \
                      'id': obj.attrib['id'], \
@@ -158,7 +165,8 @@ def main():
                     'lat': latNS (eval(obj.find("point").get("latitude"))), \
                     'lon': lonEW (eval(obj.find("point").get("longitude"))), \
                 'heading': obj.find("point").get("heading"), \
-                   'type': obj.find("ramp_start").get("type") 
+                   'type': obj.find("ramp_start").get("type"), \
+                   'type': obj.find("ramp_start").get("ramp_op_type") 
                                 })
         
         
@@ -184,7 +192,13 @@ def main():
             Parking.set ("lon", ramp['lon'])
             Parking.set ("heading", ramp['heading'])
             #dummy below
-            Parking.set ("type", "gate")
+            print "Ramptype : " + ramp['type']
+            if ramp['type'] == "Gate":
+                Parking.set ("type", "gate")
+            elif ramp['type'] == "Misc":
+                Parking.set ("type", "gate")
+            else: 
+                Parking.set ("type", "tie-down")
             Parking.set ("number", "")
             #TODO calc by type
             Parking.set ("radius", "40")
